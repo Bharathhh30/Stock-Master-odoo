@@ -11,6 +11,8 @@ import authRoutes from "./routes/auth.js";
 import productRoutes from "./routes/product.js";
 import warehouseRoutes from "./routes/warehouse.js";
 import stockRoutes from "./routes/stock.js";
+import locationRoutes from './routes/locationRoutes.js';
+
 
 const app = express();
 const server = http.createServer(app);
@@ -37,6 +39,8 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/warehouses", warehouseRoutes);
 app.use("/api/v1/stock", stockRoutes);
+app.use('/api/v1/locations', locationRoutes);
+
 
 // HEALTH ROUTE
 app.get("/api/v1/health", (req, res) => {

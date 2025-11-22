@@ -3,8 +3,8 @@ import Product from "../models/Product.js";
 
 export async function createProduct(req, res) {
   try {
-    const { name, sku, category, uom, reorderLevel } = req.body;
-    const p = await Product.create({ name, sku, category, uom, reorderLevel });
+    const { name, sku, category, uom,unitCost, reorderLevel } = req.body;
+    const p = await Product.create({ name, sku, category, uom,unitCost, reorderLevel });
     res.json({ ok: true, product: p });
   } catch (err) {
     console.error(err);

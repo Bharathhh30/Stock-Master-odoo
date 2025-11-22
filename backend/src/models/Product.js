@@ -5,6 +5,7 @@ const ProductSchema = new mongoose.Schema({
   sku: { type: String, required: true, unique: true },
   category: String,
   uom: String,
+  unitCost : {type : Number, default : 0},
   reorderLevel: { type: Number, default: 0 }, // low-stock threshold
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }
 }, { timestamps: true });
