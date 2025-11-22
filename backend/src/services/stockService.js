@@ -5,28 +5,18 @@ import Move from "../models/Move.js";
 import { emitStockChange, emitLowStock } from "./socketHelper.js";
 import Product from "../models/Product.js";
 
-/**
- * Note: all mutating functions accept `io` (socket) and `performedBy` so
- * controllers can pass req.app.get('io') and req.user.id (or req.body.performedBy).
- */
-
+// create or find stock
 export async function getOrCreateStock(productId, warehouseId, session = null) {
   const filter = { product: productId, warehouse: warehouseId };
   const update = { $setOnInsert: { quantity: 0 } };
   const opts = { new: true, upsert: true, setDefaultsOnInsert: true, session };
 
-  if (session) {
-    return Stock.findOneAndUpdate(filter, update, opts);
-  } else {
-    // no session: use a single findOneAndUpdate (upsert)
-    return Stock.findOneAndUpdate(filter, update, {
-      new: true,
-      upsert: true,
-      setDefaultsOnInsert: true,
-    });
-  }
+  return Stock.findOneAndUpdate(filter, update, opts);
 }
 
+// ----------------------------------------------
+// INCREASE STOCK
+// ----------------------------------------------
 export async function incrementStock({
   productId,
   warehouseId,
@@ -63,29 +53,38 @@ export async function incrementStock({
     await session.commitTransaction();
     session.endSession();
 
-    // Emit stock change (only if io provided)
+    // emit
     if (io) {
-      try {
-        emitStockChange(io, { productId, warehouseId, newQty: stock.quantity });
-      } catch (e) {
-        console.error("emitStockChange error (increment):", e);
-      }
+      console.log("DEBUG EMIT ATTEMPT incrementStock", {
+        productId,
+        warehouseId,
+        qty: stock.quantity,
+        ioPresent: !!io,
+      });
+
+      emitStockChange(io, {
+        productId,
+        warehouseId,
+        newQty: stock.quantity,
+      });
     }
 
-    // check low stock (safe: product might be null)
     const product = await Product.findById(productId);
-    if (product && stock.quantity <= (product.reorderLevel || 0)) {
+    if (product && stock.quantity <= product.reorderLevel) {
       if (io) {
-        try {
-          emitLowStock(io, {
-            productId,
-            warehouseId,
-            qty: stock.quantity,
-            threshold: product.reorderLevel || 0,
-          });
-        } catch (e) {
-          console.error("emitLowStock error (increment):", e);
-        }
+        console.log("DEBUG LOW-ALERT incrementStock", {
+          productId,
+          warehouseId,
+          qty: stock.quantity,
+          threshold: product.reorderLevel,
+        });
+
+        emitLowStock(io, {
+          productId,
+          warehouseId,
+          qty: stock.quantity,
+          threshold: product.reorderLevel,
+        });
       }
     }
 
@@ -97,6 +96,9 @@ export async function incrementStock({
   }
 }
 
+// ----------------------------------------------
+// DECREASE STOCK
+// ----------------------------------------------
 export async function decrementStock({
   productId,
   warehouseId,
@@ -114,9 +116,7 @@ export async function decrementStock({
       { $inc: { quantity: -qty } },
       { new: true, session }
     );
-    if (!updated) {
-      throw new Error("Insufficient stock");
-    }
+    if (!updated) throw new Error("Insufficient stock");
 
     await Move.create(
       [
@@ -137,30 +137,35 @@ export async function decrementStock({
     session.endSession();
 
     if (io) {
-      try {
-        emitStockChange(io, {
-          productId,
-          warehouseId,
-          newQty: updated.quantity,
-        });
-      } catch (e) {
-        console.error("emitStockChange error (decrement):", e);
-      }
+      console.log("DEBUG EMIT ATTEMPT decrementStock", {
+        productId,
+        warehouseId,
+        qty: updated.quantity,
+      });
+
+      emitStockChange(io, {
+        productId,
+        warehouseId,
+        newQty: updated.quantity,
+      });
     }
 
     const product = await Product.findById(productId);
-    if (product && updated.quantity <= (product.reorderLevel || 0)) {
+    if (product && updated.quantity <= product.reorderLevel) {
       if (io) {
-        try {
-          emitLowStock(io, {
-            productId,
-            warehouseId,
-            qty: updated.quantity,
-            threshold: product.reorderLevel || 0,
-          });
-        } catch (e) {
-          console.error("emitLowStock error (decrement):", e);
-        }
+        console.log("DEBUG LOW-ALERT decrementStock", {
+          productId,
+          warehouseId,
+          qty: updated.quantity,
+          threshold: product.reorderLevel,
+        });
+
+        emitLowStock(io, {
+          productId,
+          warehouseId,
+          qty: updated.quantity,
+          threshold: product.reorderLevel,
+        });
       }
     }
 
@@ -172,6 +177,9 @@ export async function decrementStock({
   }
 }
 
+// ----------------------------------------------
+// TRANSFER STOCK
+// ----------------------------------------------
 export async function transferStock({
   productId,
   fromWarehouseId,
@@ -193,7 +201,7 @@ export async function transferStock({
       { $inc: { quantity: -qty } },
       { new: true, session }
     );
-    if (!dec) throw new Error("Insufficient stock in fromWarehouse");
+    if (!dec) throw new Error("Insufficient stock in source warehouse");
 
     const inc = await Stock.findOneAndUpdate(
       { product: productId, warehouse: toWarehouseId },
@@ -220,47 +228,44 @@ export async function transferStock({
     session.endSession();
 
     if (io) {
-      try {
-        emitStockChange(io, {
-          productId,
-          warehouseId: fromWarehouseId,
-          newQty: dec.quantity,
-        });
-        emitStockChange(io, {
-          productId,
-          warehouseId: toWarehouseId,
-          newQty: inc.quantity,
-        });
-      } catch (e) {
-        console.error("emitStockChange error (transfer):", e);
-      }
+      console.log("DEBUG EMIT ATTEMPT transferStock", {
+        productId,
+        fromWarehouseId,
+        toWarehouseId,
+        decQty: dec.quantity,
+        incQty: inc.quantity,
+      });
+
+      emitStockChange(io, {
+        productId,
+        warehouseId: fromWarehouseId,
+        newQty: dec.quantity,
+      });
+
+      emitStockChange(io, {
+        productId,
+        warehouseId: toWarehouseId,
+        newQty: inc.quantity,
+      });
     }
 
     const product = await Product.findById(productId);
     if (product) {
-      if (dec.quantity <= (product.reorderLevel || 0) && io) {
-        try {
-          emitLowStock(io, {
-            productId,
-            warehouseId: fromWarehouseId,
-            qty: dec.quantity,
-            threshold: product.reorderLevel || 0,
-          });
-        } catch (e) {
-          console.error(e);
-        }
+      if (dec.quantity <= product.reorderLevel && io) {
+        emitLowStock(io, {
+          productId,
+          warehouseId: fromWarehouseId,
+          qty: dec.quantity,
+          threshold: product.reorderLevel,
+        });
       }
-      if (inc.quantity <= (product.reorderLevel || 0) && io) {
-        try {
-          emitLowStock(io, {
-            productId,
-            warehouseId: toWarehouseId,
-            qty: inc.quantity,
-            threshold: product.reorderLevel || 0,
-          });
-        } catch (e) {
-          console.error(e);
-        }
+      if (inc.quantity <= product.reorderLevel && io) {
+        emitLowStock(io, {
+          productId,
+          warehouseId: toWarehouseId,
+          qty: inc.quantity,
+          threshold: product.reorderLevel,
+        });
       }
     }
 
@@ -272,6 +277,9 @@ export async function transferStock({
   }
 }
 
+// ----------------------------------------------
+// ADJUST STOCK
+// ----------------------------------------------
 export async function adjustStock({
   productId,
   warehouseId,
@@ -285,7 +293,6 @@ export async function adjustStock({
   try {
     const stock = await getOrCreateStock(productId, warehouseId, session);
     const prev = stock.quantity;
-    const diff = countedQty - prev;
     stock.quantity = countedQty;
     await stock.save({ session });
 
@@ -295,7 +302,7 @@ export async function adjustStock({
           product: productId,
           fromWarehouse: prev >= countedQty ? warehouseId : null,
           toWarehouse: prev <= countedQty ? warehouseId : null,
-          qty: Math.abs(diff),
+          qty: Math.abs(countedQty - prev),
           type: "adjustment",
           reason,
           performedBy,
@@ -308,26 +315,28 @@ export async function adjustStock({
     session.endSession();
 
     if (io) {
-      try {
-        emitStockChange(io, { productId, warehouseId, newQty: stock.quantity });
-      } catch (e) {
-        console.error("emitStockChange error (adjust):", e);
-      }
+      console.log("DEBUG EMIT ATTEMPT adjustStock", {
+        productId,
+        warehouseId,
+        qty: stock.quantity,
+      });
+
+      emitStockChange(io, {
+        productId,
+        warehouseId,
+        newQty: stock.quantity,
+      });
     }
 
     const product = await Product.findById(productId);
-    if (product && stock.quantity <= (product.reorderLevel || 0)) {
+    if (product && stock.quantity <= product.reorderLevel) {
       if (io) {
-        try {
-          emitLowStock(io, {
-            productId,
-            warehouseId,
-            qty: stock.quantity,
-            threshold: product.reorderLevel || 0,
-          });
-        } catch (e) {
-          console.error("emitLowStock error (adjust):", e);
-        }
+        emitLowStock(io, {
+          productId,
+          warehouseId,
+          qty: stock.quantity,
+          threshold: product.reorderLevel,
+        });
       }
     }
 

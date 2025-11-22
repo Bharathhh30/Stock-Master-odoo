@@ -44,11 +44,18 @@ app.get("/api/v1/health", (req, res) => {
 });
 
 //temporart
-app.get('/api/v1/debug/emit', (req,res) => {
+// TEMP DEBUG ROUTE — add and restart server
+app.get('/api/v1/debug/emit', (req, res) => {
   const io = req.app.get('io');
-  io.emit('stock:changed:global', { productId: 'debug', warehouseId: 'debug', newQty: 999 });
+  // global emit
+  io.emit('stock:changed:global', { productId: 'debug-product', warehouseId: 'debug-wh', newQty: 999 });
+  // per-warehouse emit
+  io.to('warehouse_debug-wh').emit('stock:changed', { productId: 'debug-product', warehouseId: 'debug-wh', newQty: 999 });
+  // low-stock example
+  io.emit('stock:low', { productId: 'debug-product', warehouseId: 'debug-wh', qty: 0, threshold: 10, time: new Date().toISOString() });
   res.json({ ok: true, emitted: true });
 });
+
 
 
 // SOCKET.IO EVENTS
